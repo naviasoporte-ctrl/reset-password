@@ -154,18 +154,26 @@
       }
 
       function parseHashParams() {
-        const hash = window.location.hash?.substring(1) || "";
+        // Soporta hashes tipo:
+        // #access_token=...&type=recovery
+        // #/access_token=...&type=recovery
+        const rawHash = window.location.hash || "";
+        const cleaned = rawHash.startsWith("#") ? rawHash.slice(1) : rawHash;
+        const hash = cleaned.startsWith("/") ? cleaned.slice(1) : cleaned;
+
+        console.log("HASH recibido:", rawHash);
+
         const params = new URLSearchParams(hash);
         return {
           access_token: params.get("access_token"),
-          refresh_token: params.get("refresh_token"),
+          refresh_token: params.get("refresh_token"), // puede ser null
           type: params.get("type"),
         };
       }
 
       const { access_token, refresh_token, type } = parseHashParams();
 
-      if (!access_token || !refresh_token || type !== "recovery") {
+      if (!access_token || type !== "recovery") {
         setStatus(
           "Enlace de recuperación no válido o caducado. Vuelve a solicitarlo desde la app.",
           "error"
@@ -197,29 +205,28 @@
           submitBtn.disabled = true;
           setStatus("Actualizando contraseña...", "");
 
-          // Asociar el access_token/refresh_token a la sesión actual
-          const { error: sessionError } = await supabase.auth.setSession({
-            access_token,
-            refresh_token,
-          });
-          if (sessionError) {
-            console.error(sessionError);
-            setStatus(
-              "No se pudo validar el enlace. Vuelve a solicitarlo desde la app.",
-              "error"
-            );
-            submitBtn.disabled = false;
-            return;
+          // Si viene refresh_token intentamos crear sesión; si no, seguimos igual
+          if (refresh_token) {
+            const { error: sessionError } = await supabase.auth.setSession({
+              access_token,
+              refresh_token,
+            });
+            if (sessionError) {
+              console.warn(
+                "Error en setSession (seguimos de todas formas):",
+                sessionError
+              );
+            }
           }
 
-          // Actualizar contraseña
+          // Actualizar contraseña con la sesión de recuperación
           const { error } = await supabase.auth.updateUser({
             password: p1,
           });
           if (error) {
             console.error(error);
             setStatus(
-              "No se pudo actualizar la contraseña. Inténtalo de nuevo.",
+              "No se pudo actualizar la contraseña. Es posible que el enlace haya caducado.",
               "error"
             );
             submitBtn.disabled = false;
