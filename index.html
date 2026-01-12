@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>Restablecer contraseña - navIA</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1"
+    />
+    <style>
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        background: #0b1727;
+        color: #f9fafb;
+        display: flex;
+        min-height: 100vh;
+        align-items: center;
+        justify-content: center;
+      }
+      .card {
+        background: #111827;
+        border-radius: 16px;
+        padding: 24px 20px 20px;
+        max-width: 420px;
+        width: 100%;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.45);
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0 0 8px;
+        text-align: center;
+      }
+      p {
+        font-size: 14px;
+        color: #9ca3af;
+        margin: 0 0 14px;
+        text-align: center;
+      }
+      label {
+        font-size: 13px;
+        font-weight: 600;
+        display: block;
+        margin-bottom: 6px;
+      }
+      input {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 10px;
+        border: 1px solid #374151;
+        background: #020617;
+        color: #f9fafb;
+        font-size: 14px;
+        margin-bottom: 12px;
+        box-sizing: border-box;
+      }
+      input:focus {
+        outline: none;
+        border-color: #3b82f6;
+      }
+      button {
+        width: 100%;
+        padding: 11px 14px;
+        border-radius: 999px;
+        border: none;
+        background: #3b82f6;
+        color: #f9fafb;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+      .status {
+        font-size: 13px;
+        text-align: center;
+        margin-top: 10px;
+        min-height: 18px;
+      }
+      .status.error {
+        color: #fca5a5;
+      }
+      .status.ok {
+        color: #bbf7d0;
+      }
+      .small {
+        font-size: 11px;
+        color: #6b7280;
+        margin-top: 10px;
+        text-align: center;
+      }
+      a {
+        color: #93c5fd;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Restablecer contraseña</h1>
+      <p id="intro">
+        Introduce tu nueva contraseña para tu cuenta de navIA.
+      </p>
+
+      <form id="reset-form">
+        <label for="password">Nueva contraseña</label>
+        <input
+          id="password"
+          type="password"
+          placeholder="Mínimo 6 caracteres"
+          minlength="6"
+          required
+        />
+
+        <label for="password2">Repite la contraseña</label>
+        <input
+          id="password2"
+          type="password"
+          placeholder="Repite la contraseña"
+          minlength="6"
+          required
+        />
+
+        <button type="submit" id="submit-btn">Actualizar contraseña</button>
+      </form>
+
+      <div id="status" class="status"></div>
+      <div class="small">
+        Si el enlace ha caducado, solicita uno nuevo desde la app.
+      </div>
+    </div>
+
+    <script type="module">
+      import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+      // TODO: sustituye por los datos de tu proyecto
+      const SUPABASE_URL = "https://TU-PROJECT-ID.supabase.co";
+      const SUPABASE_ANON_KEY = "TU_PUBLIC_ANON_KEY";
+
+      const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+      const form = document.getElementById("reset-form");
+      const statusEl = document.getElementById("status");
+      const introEl = document.getElementById("intro");
+      const passwordInput = document.getElementById("password");
+      const password2Input = document.getElementById("password2");
+      const submitBtn = document.getElementById("submit-btn");
+
+      function setStatus(msg, type = "") {
+        statusEl.textContent = msg || "";
+        statusEl.className = "status " + (type || "");
+      }
+
+      function parseHashParams() {
+        const hash = window.location.hash?.substring(1) || "";
+        const params = new URLSearchParams(hash);
+        return {
+          access_token: params.get("access_token"),
+          refresh_token: params.get("refresh_token"),
+          type: params.get("type"),
+        };
+      }
+
+      const { access_token, refresh_token, type } = parseHashParams();
+
+      if (!access_token || !refresh_token || type !== "recovery") {
+        setStatus(
+          "Enlace de recuperación no válido o caducado. Vuelve a solicitarlo desde la app.",
+          "error"
+        );
+        form.style.display = "none";
+        introEl.textContent = "No se ha podido validar el enlace.";
+      } else {
+        setStatus("Introduce tu nueva contraseña.", "");
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const p1 = passwordInput.value.trim();
+        const p2 = password2Input.value.trim();
+
+        if (p1.length < 6) {
+          setStatus(
+            "La contraseña debe tener al menos 6 caracteres.",
+            "error"
+          );
+          return;
+        }
+        if (p1 !== p2) {
+          setStatus("Las contraseñas no coinciden.", "error");
+          return;
+        }
+
+        try {
+          submitBtn.disabled = true;
+          setStatus("Actualizando contraseña...", "");
+
+          // Asociar el access_token/refresh_token a la sesión actual
+          const { error: sessionError } = await supabase.auth.setSession({
+            access_token,
+            refresh_token,
+          });
+          if (sessionError) {
+            console.error(sessionError);
+            setStatus(
+              "No se pudo validar el enlace. Vuelve a solicitarlo desde la app.",
+              "error"
+            );
+            submitBtn.disabled = false;
+            return;
+          }
+
+          // Actualizar contraseña
+          const { error } = await supabase.auth.updateUser({
+            password: p1,
+          });
+          if (error) {
+            console.error(error);
+            setStatus(
+              "No se pudo actualizar la contraseña. Inténtalo de nuevo.",
+              "error"
+            );
+            submitBtn.disabled = false;
+            return;
+          }
+
+          setStatus(
+            "Contraseña actualizada correctamente. Ya puedes volver a la app e iniciar sesión.",
+            "ok"
+          );
+          form.reset();
+        } catch (e) {
+          console.error(e);
+          setStatus(
+            "Error inesperado. Inténtalo de nuevo más tarde.",
+            "error"
+          );
+          submitBtn.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>
