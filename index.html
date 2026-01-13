@@ -131,119 +131,102 @@
         Si el enlace ha caducado, solicita uno nuevo desde la app.
       </div>
     </div>
-
     <script type="module">
       import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-      // TODO: sustituye por los datos de tu proyecto
+    
+      // TODO: REVISA QUE ESTOS SEAN TUS DATOS REALES
       const SUPABASE_URL = "https://TU-PROJECT-ID.supabase.co";
       const SUPABASE_ANON_KEY = "TU_PUBLIC_ANON_KEY";
-
+    
       const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
+    
       const form = document.getElementById("reset-form");
       const statusEl = document.getElementById("status");
       const introEl = document.getElementById("intro");
       const passwordInput = document.getElementById("password");
       const password2Input = document.getElementById("password2");
       const submitBtn = document.getElementById("submit-btn");
-
+    
       function setStatus(msg, type = "") {
         statusEl.textContent = msg || "";
         statusEl.className = "status " + (type || "");
       }
-
-      function parseHashParams() {
-        // Soporta hashes tipo:
-        // #access_token=...&type=recovery
-        // #/access_token=...&type=recovery
-        const rawHash = window.location.hash || "";
-        const cleaned = rawHash.startsWith("#") ? rawHash.slice(1) : rawHash;
-        const hash = cleaned.startsWith("/") ? cleaned.slice(1) : cleaned;
-
-        console.log("HASH recibido:", rawHash);
-
-        const params = new URLSearchParams(hash);
+    
+      // Helper para parsear tanto ?query como #hash
+      function getParams() {
+        const hashParams = new URLSearchParams(window.location.hash.substring(1));
+        const queryParams = new URLSearchParams(window.location.search);
+        
+        // Prioridad al hash (que es donde Supabase suele mandar los tokens en implicit flow)
         return {
-          access_token: params.get("access_token"),
-          refresh_token: params.get("refresh_token"), // puede ser null
-          type: params.get("type"),
+          access_token: hashParams.get("access_token") || queryParams.get("access_token"),
+          refresh_token: hashParams.get("refresh_token") || queryParams.get("refresh_token"),
+          type: hashParams.get("type") || queryParams.get("type"),
+          error: hashParams.get("error_description") || queryParams.get("error_description")
         };
       }
-
-      const { access_token, refresh_token, type } = parseHashParams();
-
-      if (!access_token || type !== "recovery") {
-        setStatus(
-          "Enlace de recuperación no válido o caducado. Vuelve a solicitarlo desde la app.",
-          "error"
-        );
+    
+      const { access_token, refresh_token, type, error } = getParams();
+    
+      console.log("Params:", { access_token, refresh_token, type, error });
+    
+      if (error) {
+        setStatus("Error: " + error, "error");
         form.style.display = "none";
-        introEl.textContent = "No se ha podido validar el enlace.";
+      } else if (!access_token || type !== "recovery") {
+        setStatus("Enlace no válido. Asegúrate de abrir el enlace desde el correo.", "error");
+        form.style.display = "none";
       } else {
-        setStatus("Introduce tu nueva contraseña.", "");
+        // Intentamos establecer sesión NADA MÁS CARGAR para ver si el token es válido
+        // Así el usuario no rellena el form para nada.
+        supabase.auth.setSession({ access_token, refresh_token }).then(({ data, error }) => {
+          if (error) {
+            console.error("Error setting session:", error);
+            setStatus("El enlace ha caducado o ya fue usado. Pide uno nuevo.", "error");
+            form.style.display = "none";
+          } else {
+            console.log("Sesión establecida correctamente", data);
+            setStatus("Introduce tu nueva contraseña.", "");
+          }
+        });
       }
-
+    
       form.addEventListener("submit", async (event) => {
         event.preventDefault();
         const p1 = passwordInput.value.trim();
         const p2 = password2Input.value.trim();
-
+    
         if (p1.length < 6) {
-          setStatus(
-            "La contraseña debe tener al menos 6 caracteres.",
-            "error"
-          );
+          setStatus("La contraseña debe tener al menos 6 caracteres.", "error");
           return;
         }
         if (p1 !== p2) {
           setStatus("Las contraseñas no coinciden.", "error");
           return;
         }
-
+    
         try {
           submitBtn.disabled = true;
-          setStatus("Actualizando contraseña...", "");
-
-          // Si viene refresh_token intentamos crear sesión; si no, seguimos igual
-          if (refresh_token) {
-            const { error: sessionError } = await supabase.auth.setSession({
-              access_token,
-              refresh_token,
-            });
-            if (sessionError) {
-              console.warn(
-                "Error en setSession (seguimos de todas formas):",
-                sessionError
-              );
-            }
-          }
-
-          // Actualizar contraseña con la sesión de recuperación
-          const { error } = await supabase.auth.updateUser({
+          submitBtn.textContent = "Actualizando...";
+          setStatus("", "");
+    
+          const { data, error } = await supabase.auth.updateUser({
             password: p1,
           });
+    
           if (error) {
-            console.error(error);
-            setStatus(
-              "No se pudo actualizar la contraseña. Es posible que el enlace haya caducado.",
-              "error"
-            );
+            console.error("Update error:", error);
+            setStatus("Error: " + error.message, "error");
             submitBtn.disabled = false;
-            return;
+            submitBtn.textContent = "Actualizar contraseña";
+          } else {
+            setStatus("¡Contraseña actualizada! Ya puedes entrar en la app.", "ok");
+            form.reset();
+            submitBtn.style.display = "none";
           }
-
-          setStatus(
-            "Contraseña actualizada correctamente. Ya puedes volver a la app e iniciar sesión.",
-            "ok"
-          );
-          form.reset();
         } catch (e) {
           console.error(e);
-          setStatus(
-            "Error inesperado. Inténtalo de nuevo más tarde.",
-            "error"
-          );
+          setStatus("Error inesperado: " + e.message, "error");
           submitBtn.disabled = false;
         }
       });
